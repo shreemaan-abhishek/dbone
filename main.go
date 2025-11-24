@@ -67,12 +67,12 @@ func main() {
 			continue
 		}
 
-		table.prepareCommand(input)
+		table.PrepareCommand(input)
 
 	}
 }
 
-func (table *Table) prepareCommand(statement []byte) *Row {
+func (table *Table) PrepareCommand(statement []byte) *Row {
 	// TODO: validate the format of statement
 	statement_str := string(statement)
 	var row Row
