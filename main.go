@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -31,12 +32,22 @@ type Row struct {
 
 type Table struct {
 	numRows uint32
-	pages   [TABLE_SIZE]byte
+	pages   []byte
+	dbFile  string
 }
 
-var table Table
-
 func main() {
+	var table Table
+	table.dbFile = "dbone.db"
+	data, err := os.ReadFile(table.dbFile)
+	if err != nil {
+		log.Printf("failed to read db file: %s", err.Error())
+	} else {
+		table.pages = make([]byte, len(data))
+		copy(table.pages[:], data)
+		table.numRows = uint32(len(data)) / ROW_SIZE
+	}
+
 	for {
 		fmt.Print("dbone > ")
 		reader := bufio.NewReader(os.Stdin)
@@ -46,17 +57,22 @@ func main() {
 		}
 		if input[0] == '.' {
 			if doMetaCommand(input) != 0 {
+				err := os.WriteFile(table.dbFile, table.pages[:], 0644)
+				if err != nil {
+					log.Fatalf("failed to read db file: %s", err.Error())
+				}
+
 				return
 			}
 			continue
 		}
 
-		prepareCommand(input)
+		table.prepareCommand(input)
 
 	}
 }
 
-func prepareCommand(statement []byte) *Row {
+func (table *Table) prepareCommand(statement []byte) *Row {
 	// TODO: validate the format of statement
 	statement_str := string(statement)
 	var row Row
@@ -66,18 +82,18 @@ func prepareCommand(statement []byte) *Row {
 
 	switch command {
 	case "select":
-		fmt.Println("selecting...")
 		for i := 0; i < int(table.numRows); i++ {
-			row := rowSlot(uint32(i))
-			data := deserialise(table.pages[row:])
+			row, bound := rowSlot(uint32(i))
+			data := deserialise(table.pages[row:bound])
 			fmt.Println(data)
 		}
 
 	case "insert":
-		slot := rowSlot(table.numRows)
+		slot, bound := rowSlot(table.numRows)
 		fmt.Println("inserting @ ", slot)
 		serialisedRow := serialise(row)
-		copy(table.pages[slot:], serialisedRow)
+		table.pages = append(table.pages, make([]byte, ROW_SIZE)...)
+		copy(table.pages[slot:bound], serialisedRow)
 		table.numRows = table.numRows + 1
 		return &row
 
@@ -108,7 +124,7 @@ func deserialise(bin []byte) Row {
 func doMetaCommand(input []byte) int {
 	inputStr := string(input)
 	switch inputStr {
-	case ".exit":
+	case ".exit\n":
 		return -1
 	default:
 		fmt.Println("unrecognized command")
@@ -116,10 +132,17 @@ func doMetaCommand(input []byte) int {
 	}
 }
 
-func rowSlot(rowNum uint32) uint32 {
+func rowSlot(rowNum uint32) (uint32, uint32) {
 	pageNum := rowNum / ROWS_PER_PAGE
 	rowOffset := rowNum % ROWS_PER_PAGE
 	byteOffset := rowOffset * ROW_SIZE
 
-	return pageNum + byteOffset
+	slot := pageNum + byteOffset
+	bound := slot + ROW_SIZE
+
+	if bound > TABLE_SIZE {
+		log.Fatalf("row %d out of bounds", rowNum)
+	}
+
+	return slot, bound
 }
